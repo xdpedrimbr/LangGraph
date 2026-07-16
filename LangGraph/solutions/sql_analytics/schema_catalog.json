@@ -1,0 +1,277 @@
+{
+  "tables": [
+    {
+      "name": "imaiscatalog.gold_prod.mvp_dados_intermediarios",
+      "description": "Tabela principal de vendas item a item. Cada linha é um produto vendido em uma nota fiscal.",
+      "grain": "line_item",
+      "usage_notes": [
+        "SEMPRE filtre TIPO_NOTA = 'SAIDA' para consultas de venda. TIPO_NOTA = 'ENTRADA' são compras.",
+        "Para faturamento total: SUM(VALOR). Para ticket médio: SUM(VALOR)/COUNT(DISTINCT NOTAS).",
+        "Para agrupamento diário: to_date(DATA_EMISSAO). Para mensal: ANO_MES (mais rápido).",
+        "Sempre filtre pelo CNPJ do estabelecimento.",
+        "Para ranking de produtos: agrupe por DESC_PROD e some VALOR ou QUANTIDADE_COMPRADA."
+      ],
+      "columns": [
+        { "name": "CNPJ",               "type": "string",    "description": "CNPJ do estabelecimento. Sempre use para filtrar os dados do cliente." },
+        { "name": "NOTAS",              "type": "string",    "description": "Número da nota fiscal. Use COUNT(DISTINCT NOTAS) para contar transações/pedidos." },
+        { "name": "DATA_EMISSAO",       "type": "timestamp", "description": "Data e hora de emissão da nota. Use to_date(DATA_EMISSAO) para agrupar por dia." },
+        { "name": "ANO_MES",            "type": "string",    "description": "Mês no formato 'YYYY-MM' (ex: '2025-03'). Prefira para filtros e agrupamentos mensais." },
+        { "name": "MES",                "type": "int",       "description": "Mês referente a venda do item/emissão da nota. Facilita para agrupamento por mês." },
+        { "name": "TIPO_NOTA",          "type": "string",    "description": "Tipo da nota: 'SAIDA' = venda ao cliente, 'ENTRADA' = compra. SEMPRE filtre TIPO_NOTA = 'SAIDA' para vendas/faturamento." },
+        { "name": "DESC_PROD",          "type": "string",    "description": "Nome do produto vendido. Use para ranking de produtos e filtros por produto." },
+        { "name": "CODIGO_GTIN",        "type": "string",    "description": "Código GTIN/CEAN do produto da nota fiscal. Uma nota pode ter vários produtos (GTIN)." },
+        { "name": "VALOR",              "type": "decimal",   "description": "Valor total da linha (preço × quantidade). SUM(VALOR) = faturamento/receita total." },
+        { "name": "VALOR_UNITARIO",     "type": "decimal",   "description": "Valor unitário de um produto da nota fiscal." },
+        { "name": "QUANTIDADE_COMPRADA","type": "decimal",   "description": "Quantidade de unidades de produtos vendidos nessa linha/nota fiscal. SUM(QUANTIDADE_COMPRADA) = volume em unidades." },
+        { "name": "MARCA",              "type": "string",    "description": "Marca do produto da nota fiscal." },
+        { "name": "FABRICANTE",         "type": "string",    "description": "Fabricante do produto da nota fiscal." },
+        { "name": "DEPARTAMENTO",       "type": "string",    "description": "Indica se ele é ALIMENTAR ou NAO ALIMENTAR." },
+        { "name": "SECAO",              "type": "string",    "description": "Indica que seção o produto se encaixa." },
+        { "name": "CATEGORIA",          "type": "string",    "description": "Indica a categoria do produto." },
+        { "name": "SUBCATEGORIA",       "type": "string",    "description": "Indica a subcategoria do produto." },
+        { "name": "UNIDADE",            "type": "string",    "description": "Indica se o produto é por UNIDADE, CAIXA, GRAMAS, etc" },
+        { "name": "RAZAO_SOCIAL",       "type": "string",    "description": "Razão social do estabelecimento. Não expor ao usuário final." },
+        { "name": "UF",                 "type": "string",    "description": "Estado/Unidade federativa que foi emitido a nota." },
+        { "name": "MUNICIPIO",          "type": "string",    "description": "Cidade que foi emitido a nota." },
+        { "name": "TAMANHO_LOJA",       "type": "string",    "description": "Indica o tamanho da loja." },
+        { "name": "APROVADO",           "type": "string",    "description": "Controle interno, não é muito util no geral." },
+        { "name": "HORA_EMISSAO",       "type": "string",    "description": "Indica a hora que a nota foi emitida." },
+        { "name": "ORIGEM",             "type": "string",    "description": "Controle interno, não é muito util no geral." },
+        { "name": "MESORREGIAO",        "type": "string",    "description": "Indica a mesorregião que a nota foi emitida." },
+        { "name": "REGIAO_BR",          "type": "string",    "description": "Indica em qual região do Brasil a nota foi emitida." },
+        { "name": "QTRIB",              "type": "decimal",   "description": "Imposto sobre a quantidade de produtos da nota." },
+        { "name": "VUNTRIB",            "type": "decimal",   "description": "Imposto sobre o valor de cada produto da nota." },
+        { "name": "UTRIB",              "type": "string",    "description": "Imposto sobre a unidade de produtos da nota." },
+        { "name": "VERSAO",             "type": "string",    "description": "Controle interno, não é muito util no geral." }
+      ]
+    },
+    {
+      "name": "imaiscatalog.gold_prod.nova_mvp_vendas",
+      "description": "Agregados mensais do estabelecimento com comparativo de mercado. Use para perguntas de mês fechado sem detalhamento por produto.",
+      "grain": "monthly",
+      "usage_notes": [
+        "Granularidade mensal apenas. Não tem dados diários nem por produto.",
+        "Para comparar com o mercado use: VALOR_TOTAL_MERCADO, TICKET_MEDIO_MERCADO.",
+        "ANO_MES no formato 'YYYY-MM'. Para mês atual: ANO_MES = date_format(current_date(), 'yyyy-MM').",
+        "Sempre filtre pelo CNPJ do estabelecimento."
+      ],
+      "columns": [
+        { "name": "CNPJ",                       "type": "string",  "description": "CNPJ do estabelecimento. Sempre use para filtrar." },
+        { "name": "ANO_MES",                    "type": "string",  "description": "Mês de referência no formato 'YYYY-MM' (ex: '2025-03')." },
+        { "name": "VALOR_CLIENTE",              "type": "decimal", "description": "Faturamento total do estabelecimento no mês." },
+        { "name": "NOTAS_CLIENTE",              "type": "int",     "description": "Número de transações (notas fiscais) do estabelecimento no mês." },
+        { "name": "TICKET_MEDIO_CLIENTE",       "type": "decimal", "description": "Ticket médio do estabelecimento no mês = VALOR_CLIENTE / NOTAS_CLIENTE." },
+        { "name": "VALOR_TOTAL_MERCADO",        "type": "decimal", "description": "Faturamento somado de todos os estabelecimentos comparáveis no mercado naquele mês." },
+        { "name": "VALOR_MEDIO_MERCADO_MENSAL", "type": "decimal", "description": "Faturamento médio dos estabelecimentos do mercado no mês. Compare com VALOR_CLIENTE para benchmark." },
+        { "name": "TICKET_MEDIO_MERCADO",       "type": "decimal", "description": "Ticket médio dos estabelecimentos do mercado no mês. Compare com TICKET_MEDIO_CLIENTE." },
+        { "name": "QTD_NOTAS_MERCADO",          "type": "int",     "description": "Indica a quantidade de notas dos estabelecimentos do mercado no mês." },
+        { "name": "LOJAS_CONCORRENTES",         "type": "int",     "description": "Indica a quantidade de lojas concorrentes." },
+        { "name": "EH_OUTLIER",                 "type": "boolean", "description": "Controle interno, não é muito util no geral." },
+        { "name": "RAZAO_SOCIAL",               "type": "string",  "description": "Razão social. Não expor ao usuário final." },
+        { "name": "UF",                         "type": "string",  "description": "Estado/Unidade federativa que foi emitido a nota." },
+        { "name": "TAMANHO_LOJA",               "type": "string",  "description": "Indica o tamanho da loja." },
+        { "name": "NIVEL_FINAL",                "type": "string",  "description": "Indica a região que foi feita a comparação, mas fala se foi meso, UF ou regiao_br." }
+      ]
+    },
+    {
+      "name": "imaiscatalog.gold_prod.whatsapp_user_permissions",
+      "description": "Mapeamento de usuários WhatsApp para CNPJ do estabelecimento. Usada internamente para resolver o CNPJ e obter o nome do usuário — não use em consultas analíticas.",
+      "grain": "mapping",
+      "usage_notes": [
+        "Para filtrar pelo telefone normalize whatsapp_contact: 10 dígitos → concat('55', DDD, '9', 8 dígitos); 11 dígitos → concat('55', 11 dígitos).",
+        "Não use em consultas analíticas de vendas — use apenas para resolver phone → cnpj / user_name."
+      ],
+      "columns": [
+        { "name": "user_id",           "type": "int",    "description": "Identificador interno do usuário." },
+        { "name": "user_name",         "type": "string", "description": "Nome do usuário/responsável pelo estabelecimento." },
+        { "name": "company_id",        "type": "int",    "description": "Identificador interno da empresa." },
+        { "name": "cnpj",              "type": "string", "description": "CNPJ do estabelecimento vinculado ao usuário." },
+        { "name": "resource_name",     "type": "string", "description": "Nome do recurso/permissão concedida." },
+        { "name": "is_allowed",        "type": "int",    "description": "1 = acesso permitido, 0 = bloqueado." },
+        { "name": "whatsapp_contact",  "type": "string", "description": "Número WhatsApp no formato DDDnumero (sem 55 e sem 9). Normalizar antes de comparar." },
+        { "name": "receive_insights",  "type": "int",    "description": "1 = usuário recebe insights automáticos." },
+        { "name": "updated_at",        "type": "timestamp", "description": "Data da última atualização do registro." }
+      ]
+    },
+    {
+      "name": "imaiscatalog.bronze_prod.cadcrfclitgv",
+      "description": "Certificados digitais dos estabelecimentos. Use para verificar validade do certificado.",
+      "grain": "cert",
+      "usage_notes": [
+        "Use NUMCGCCLI para filtrar pelo CNPJ do estabelecimento.",
+        "DATFIMVLDINF é a data de expiração. Compare com current_date() para saber se está vencido."
+      ],
+      "columns": [
+        { "name": "NUMCGCCLI",       "type": "string", "description": "CNPJ do estabelecimento (equivale ao CNPJ nas outras tabelas)." },
+        { "name": "DATFIMVLDINF",    "type": "date",   "description": "Data de vencimento do certificado digital." },
+        { "name": "DATINIVLDINF",    "type": "date",   "description": "Data de início da validade do certificado." },
+        { "name": "NOMCLIFRNASC",    "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "CODSTAVLD",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "NOMFNTAUT",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "SEQGRCPRS",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "NUMSEQENTNOTFSC", "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "CDOANXDOCTRP",    "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DESPSWSGR",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DESIDTCME",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "CDODISUTZMRT",    "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DESTIPINFCLI",    "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "CODTIPINFCLI",    "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DESGRPIND",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DESURLIMG",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DESENDURLSIS",    "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "INDCLIPAD",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "QDECNR",          "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "CODFNCDST",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DATDST",          "type": "date",   "description": "Controle interno, não é muito util no geral." },
+        { "name": "DATALT",          "type": "date",   "description": "Controle interno, não é muito util no geral." },
+        { "name": "CODFNCALT",       "type": "string", "description": "Controle interno, não é muito util no geral." },
+        { "name": "DATBLQSLT",       "type": "date",   "description": "Controle interno, não é muito util no geral." },
+        { "name": "data_insercao",   "type": "timestamp", "description": "Controle interno, não é muito util no geral." },
+        { "name": "data_atualizacao","type": "timestamp", "description": "Controle interno, não é muito util no geral." }
+      ]
+    },
+    {
+      "name": "imaiscatalog.gold_prod.nova_mvp_curva_abcd",
+      "description": "Curva ABCD de produtos por estabelecimento. Classifica cada produto em A/B/C/D tanto para o cliente quanto para o mercado. Use para perguntas de representatividade, performance por produto e benchmarks de mix.",
+      "grain": "product",
+      "usage_notes": [
+        "Sempre filtre pelo CNPJ do estabelecimento.",
+        "CURVA_CLIENTE = classificação do produto na loja do cliente (A/B/C/D).",
+        "CURVA_MERCADO = classificação do mesmo produto na média do mercado (A/B/C/D).",
+        "Produtos A = maior representatividade/faturamento. D = menor.",
+        "Use CODIGO_GTIN para cruzar com mvp_dados_intermediarios quando precisar de tendência de vendas.",
+        "Não tem dimensão temporal — representa o período atual calculado."
+      ],
+      "columns": [
+        { "name": "CNPJ",               "type": "string",  "description": "CNPJ do estabelecimento. Sempre use para filtrar." },
+        { "name": "CODIGO_GTIN",        "type": "string",  "description": "Código GTIN/CEAN do produto da nota fiscal. Uma nota pode ter vários produtos (GTIN)." },
+        { "name": "DESC_PROD",          "type": "string",  "description": "Nome do produto vendido. Use para ranking de produtos e filtros por produto." },
+        { "name": "CATEGORIA",          "type": "string",  "description": "Indica a categoria do produto." },
+        { "name": "SUBCATEGORIA",       "type": "string",  "description": "Indica a subcategoria do produto." },
+        { "name": "CURVA_CLIENTE",      "type": "string",  "description": "Indica qual curva o produto está na loja do cliente. Resultados da coluna: CURVA A, CURVA B, CURVA C, CURVA D." },
+        { "name": "CURVA_MERCADO",      "type": "string",  "description": "Indica qual curva o produto está no mercado/outros estabelecimentos. Resultados da coluna: CURVA A, CURVA B, CURVA C, CURVA D." },
+        { "name": "VALOR",              "type": "decimal", "description": "Valor total da linha (preço × quantidade). SUM(VALOR) = faturamento/receita total." },
+        { "name": "QUANTIDADE_COMPRADA","type": "decimal", "description": "Quantidade vendido do produto." },
+        { "name": "VALOR_UNITARIO",     "type": "decimal", "description": "Valor unitário de um produto da nota fiscal." },
+        { "name": "RAZAO_SOCIAL",       "type": "string",  "description": "Razão social. Não expor ao usuário final." },
+        { "name": "UF",                 "type": "string",  "description": "Estado/Unidade federativa que foi emitido a nota." },
+        { "name": "TAMANHO_LOJA",       "type": "string",  "description": "Qual o tamanho da loja que estamos olhando o CNPJ. Pode ser: MEDIA, MUITO PEQUENA, PEQUENA, GRANDE." }
+      ]
+    },
+    {
+      "name": "imaiscatalog.gold_prod.pdv_daily_metrics",
+      "description": "Métricas diárias dos PDVs (pontos de venda / caixas / terminais) do estabelecimento. Cada linha é um PDV em um dia específico.",
+      "grain": "daily_pdv",
+      "usage_notes": [
+        "Use Cnpj para filtrar pelo estabelecimento do cliente.",
+        "MacAddress identifica cada PDV/caixa/terminal único.",
+        "COUNT(DISTINCT MacAddress) = quantidade de PDVs operantes.",
+        "SUM(QtdNotasProcessadas) = total de notas processadas pelos PDVs.",
+        "QtdTravamentos, QtdAlertasInatividade, QtdQuedasInternet = indicadores de problemas.",
+        "DataReferencia é a data do registro. Use para filtrar por período."
+      ],
+      "columns": [
+        { "name": "DataReferencia",         "type": "date",    "description": "Data de referência da métrica diária do PDV." },
+        { "name": "Cnpj",                   "type": "string",  "description": "CNPJ do estabelecimento. Sempre use para filtrar." },
+        { "name": "PcName",                 "type": "string",  "description": "Nome do computador/terminal do PDV." },
+        { "name": "MacAddress",             "type": "string",  "description": "Endereço MAC do PDV. Identifica cada caixa/terminal de forma única." },
+        { "name": "QtdTravamentos",         "type": "int",     "description": "Quantidade de travamentos do PDV no dia." },
+        { "name": "QtdAlertasInatividade",  "type": "int",     "description": "Quantidade de alertas de inatividade do PDV no dia." },
+        { "name": "MaxMinutosInativo",      "type": "int",     "description": "Tempo máximo em minutos que o PDV ficou inativo no dia." },
+        { "name": "QtdQuedasInternet",      "type": "int",     "description": "Quantidade de quedas de internet do PDV no dia." },
+        { "name": "QtdRetornosInternet",    "type": "int",     "description": "Quantidade de retornos de internet do PDV no dia." },
+        { "name": "QtdNotasProcessadas",    "type": "int",     "description": "Quantidade de notas fiscais processadas pelo PDV no dia." },
+        { "name": "QtdNotasLegadas",        "type": "int",     "description": "Quantidade de notas legadas (enviadas com atraso) pelo PDV no dia." }
+      ]
+    },
+    {
+      "name": "imaiscatalog.bronze_prod.configpdv",
+      "description": "Configuração dos PDVs (pontos de venda) do estabelecimento. Contém dados de versão e configuração de cada terminal.",
+      "grain": "config",
+      "usage_notes": [
+        "Use Cnpjs para filtrar pelo CNPJ do estabelecimento (note o plural: Cnpjs).",
+        "MacAddress identifica cada PDV. Cruze com pdv_daily_metrics.MacAddress.",
+        "Versao indica a versão do software instalado no PDV."
+      ],
+      "columns": [
+        { "name": "Cnpjs",          "type": "string",  "description": "CNPJ do estabelecimento. ATENÇÃO: nome da coluna é Cnpjs (com s)." },
+        { "name": "MacAddress",     "type": "string",  "description": "Endereço MAC do PDV. Identifica o terminal." },
+        { "name": "PCName",         "type": "string",  "description": "Nome do computador/terminal." },
+        { "name": "MesesAtras",     "type": "int",     "description": "Configuração de quantos meses para trás buscar dados." },
+        { "name": "ApagarDepois",   "type": "int",     "description": "Configuração de dias para apagar dados antigos." },
+        { "name": "EnviarACada",    "type": "int",     "description": "Configuração de intervalo de envio em minutos." },
+        { "name": "LerSubpastas",   "type": "boolean", "description": "Se deve ler subpastas para buscar notas." },
+        { "name": "Versao",         "type": "string",  "description": "Versão do software do PDV instalado." },
+        { "name": "DataConfig",     "type": "date",    "description": "Data da última configuração do PDV." }
+      ]
+    }
+
+    ,
+    {
+      "name": "imaiscatalog.silver_prod.estoque_quantum_poc",
+      "description": "Estoque diário do estabelecimento. Cada produto tem uma linha por dia (snapshot). Use sempre a snapshot mais recente (ROW_NUMBER por CODIGO). Para filtrar pelo CNPJ do cliente é obrigatório fazer JOIN com dim_cli.",
+      "grain": "daily_product_snapshot",
+      "usage_notes": [
+        "NUNCA filtre diretamente pelo CNPJ — a tabela não tem coluna CNPJ. Sempre faça JOIN com imaiscatalog.gold_prod.dim_cli ON dim_cli.SRK_CLI = estoque_quantum_poc.SRK_CLI e filtre WHERE lpad(cast(dim_cli.CNPJ_CPF as string), 14, '0') = '{cnpj}'.",
+        "A tabela tem múltiplas linhas por CODIGO (um snapshot diário). Para pegar o estado atual, sempre use ROW_NUMBER() OVER (PARTITION BY CODIGO ORDER BY DATA_RELATORIO DESC) = 1 dentro de uma CTE.",
+        "CEAN é o código GTIN/EAN (código de barras) do produto. Exiba sempre que disponível.",
+        "Para buscar produto por nome use translate(lower(DESCRICAO), 'áàâãéèêíìîóòôõúùûüç', 'aaaaeeeiiioooouuuuc') LIKE '%termo%'.",
+        "Para buscar por GTIN/CEAN use: cast(CEAN as string) = 'valor' (match exato) ou LIKE 'valor%' (prefixo).",
+        "QNT_ESTOQUE <= 0 indica produto sem saldo (zerado/ruptura)."
+      ],
+      "columns": [
+        { "name": "SRK_CLI",        "type": "int",    "description": "Código interno do cliente. Chave de join com dim_cli.SRK_CLI." },
+        { "name": "CEAN",           "type": "string", "description": "Código GTIN/EAN (código de barras) do produto. Exibir como 'GTIN' ao usuário." },
+        { "name": "CODIGO",         "type": "string", "description": "Código interno do produto no sistema do cliente." },
+        { "name": "DESCRICAO",      "type": "string", "description": "Nome/descrição do produto. Use para filtros de busca por nome." },
+        { "name": "UNIDADE_MEDIDA", "type": "string", "description": "Unidade de medida: UN (unidade), KG (quilo), CX (caixa), etc." },
+        { "name": "QNT_ESTOQUE",    "type": "float",  "description": "Quantidade em estoque. Pode ser decimal para produtos em KG." },
+        { "name": "DATA_RELATORIO", "type": "date",   "description": "Data do snapshot diário. Use MAX para pegar o mais recente." }
+      ]
+    },
+    {
+      "name": "imaiscatalog.gold_prod.dim_cli",
+      "description": "Dimensão de clientes. Usada exclusivamente para converter CNPJ em SRK_CLI ao fazer JOIN com a tabela de estoque. Não use para consultas analíticas diretas.",
+      "grain": "client",
+      "usage_notes": [
+        "Use APENAS como JOIN intermediário para resolver o CNPJ na tabela estoque_quantum_poc.",
+        "Filtro de CNPJ: lpad(cast(CNPJ_CPF as string), 14, '0') = '{cnpj}'."
+      ],
+      "columns": [
+        { "name": "SRK_CLI",  "type": "int",    "description": "Chave surrogate do cliente. Use para JOIN com estoque_quantum_poc.SRK_CLI." },
+        { "name": "CNPJ_CPF", "type": "string", "description": "CNPJ do estabelecimento (pode estar como número sem zeros à esquerda). Sempre use lpad(cast(CNPJ_CPF as string), 14, '0') para comparar." }
+      ]
+    }
+  ],
+  "join_hints": [
+    "Para combinar itens com agregados mensais: mvp_dados_intermediarios.CNPJ = nova_mvp_vendas.CNPJ AND mvp_dados_intermediarios.ANO_MES = nova_mvp_vendas.ANO_MES",
+    "Para estoque por CNPJ: JOIN imaiscatalog.gold_prod.dim_cli c ON c.SRK_CLI = e.SRK_CLI WHERE lpad(cast(c.CNPJ_CPF as string), 14, '0') = '{cnpj}'"
+  ],
+  "metric_glossary": [
+    {
+      "term": "faturamento",
+      "maps_to": "SUM(VALOR) na mvp_dados_intermediarios, ou VALOR_CLIENTE na nova_mvp_vendas",
+      "preferred_table_by_grain": { "daily": "mvp_dados_intermediarios", "monthly": "nova_mvp_vendas" }
+    },
+    {
+      "term": "transacoes",
+      "maps_to": "COUNT(DISTINCT NOTAS) na mvp_dados_intermediarios, ou NOTAS_CLIENTE na nova_mvp_vendas",
+      "preferred_table_by_grain": { "daily": "mvp_dados_intermediarios", "monthly": "nova_mvp_vendas" }
+    },
+    {
+      "term": "ticket medio",
+      "maps_to": "TICKET_MEDIO_CLIENTE na nova_mvp_vendas (mensal), ou SUM(VALOR)/COUNT(DISTINCT NOTAS) na mvp_dados_intermediarios (diário)",
+      "preferred_table_by_grain": { "daily": "mvp_dados_intermediarios", "monthly": "nova_mvp_vendas" }
+    },
+    {
+      "term": "quantidade vendida",
+      "maps_to": "SUM(QUANTIDADE_COMPRADA) na mvp_dados_intermediarios",
+      "preferred_table_by_grain": { "daily": "mvp_dados_intermediarios", "monthly": "mvp_dados_intermediarios" }
+    },
+    {
+      "term": "mercado / concorrentes",
+      "maps_to": "VALOR_TOTAL_MERCADO, VALOR_MEDIO_MERCADO_MENSAL, TICKET_MEDIO_MERCADO na nova_mvp_vendas",
+      "preferred_table_by_grain": { "monthly": "nova_mvp_vendas" }
+    }
+  ]
+}

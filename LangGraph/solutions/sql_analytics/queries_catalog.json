@@ -1,0 +1,982 @@
+{
+  "version": "1.0.0",
+  "name": "iMAIS LangQueries Catalog",
+  "dialect": "databricks_spark_sql",
+  "defaults": {
+    "catalog": "imaiscatalog",
+    "schema": "gold_prod",
+    "default_limit": 10,
+    "max_limit": 300,
+    "min_market_shops": 5,
+    "default_lookback_days": 30
+  },
+  "tables": [
+    {
+      "name": "imaiscatalog.gold_prod.mvp_dados_intermediarios",
+      "alias": "i",
+      "purpose": "Fato de vendas/itens por nota (SAIDA), com datas, produtos, valor, quantidade, UF, categoria."
+    },
+    {
+      "name": "imaiscatalog.gold_prod.nova_mvp_vendas",
+      "alias": "v",
+      "purpose": "Agregados mensais do estabelecimento (ticket medio, valor cliente, qtd notas), por ANO_MES."
+    },
+    {
+      "name": "imaiscatalog.gold_prod.dim_cli",
+      "alias": "c",
+      "purpose": "Dimensao cliente/estabelecimento (CNPJ_CPF, UF, fantasia)."
+    },
+    {
+      "name": "imaiscatalog.bronze_prod.cadcrfclitgv",
+      "alias": "cert",
+      "purpose": "Certificados digitais (NUMCGCCLI, DATFIMVLDINF)."
+    }
+  ],
+  "common_params": {
+    "cnpj": { "type": "string", "example": "07789286000185" },
+    "dt_ini": { "type": "date", "example": "2025-12-01" },
+    "dt_fim": { "type": "date", "example": "2025-12-31" },
+    "dt_ini_1": { "type": "date", "example": "2025-02-01" },
+    "dt_fim_1": { "type": "date", "example": "2025-02-28" },
+    "dt_ini_2": { "type": "date", "example": "2025-03-01" },
+    "dt_fim_2": { "type": "date", "example": "2025-03-31" },
+    "limit": { "type": "int", "example": 5 },
+    "product_like": { "type": "string", "example": "%PAO%" },
+    "category": { "type": "string", "example": "BEBIDAS" },
+    "uf": { "type": "string", "example": "MG" },
+    "min_shops": { "type": "int", "example": 5 },
+    "months_back": { "type": "int", "example": 12 }
+  },
+  "queries": [
+    {
+      "id": "total_vendido_periodo",
+      "title": "Total vendido no periodo (faturamento)",
+      "description": "Soma do valor vendido (SAIDA) no periodo para um CNPJ.",
+      "metric": "faturamento",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["faturamento", "total", "periodo"],
+      "aliases": [
+        "quanto vendi",
+        "total vendido",
+        "faturamento total",
+        "receita total",
+        "valor vendido"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": ["tipo_nota"],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date" },
+      "rewrite_hints": [
+        "Se o usuario disser 'mes passado', preencher dt_ini/dt_fim com o mes anterior completo.",
+        "Se o usuario disser 'ultimos 30 dias', usar dt_ini=today-30, dt_fim=today."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_VENDIDO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)"
+    },
+
+    {
+      "id": "top_produtos_faturamento_periodo",
+      "title": "Top N produtos por faturamento no periodo",
+      "description": "Lista os produtos com maior valor vendido no periodo para um CNPJ.",
+      "metric": "faturamento",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["produtos", "top", "faturamento"],
+      "aliases": [
+        "top produtos",
+        "produtos que mais faturaram",
+        "quais produtos mais venderam em valor",
+        "maior faturamento por produto"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "limit"],
+      "optional_params": ["product_like"],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "limit": "int", "product_like": "string" },
+      "rewrite_hints": [
+        "Se usuario mencionar um produto/termo, preencher product_like com %TERMO% e filtrar no WHERE.",
+        "Se usuario pedir 'top 3/5/10', usar limit correspondente."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  UPPER(i.DESC_PROD) AS PRODUTO,\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n  AND (:product_like IS NULL OR i.DESC_PROD ILIKE :product_like)\nGROUP BY UPPER(i.DESC_PROD)\nORDER BY FATURAMENTO DESC\nLIMIT :limit"
+    },
+
+    {
+      "id": "top_produtos_quantidade_periodo",
+      "title": "Top N produtos por quantidade no periodo",
+      "description": "Ranking de produtos por quantidade vendida no periodo para um CNPJ.",
+      "metric": "quantidade",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["produtos", "top", "quantidade"],
+      "aliases": [
+        "produtos mais vendidos",
+        "top produtos em quantidade",
+        "mais vendidos em unidades"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "limit"],
+      "optional_params": ["product_like"],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "limit": "int", "product_like": "string" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  UPPER(i.DESC_PROD) AS PRODUTO,\n  SUM(CAST(i.QUANTIDADE_COMPRADA AS DECIMAL(15,2))) AS QUANTIDADE_VENDIDA\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n  AND (:product_like IS NULL OR i.DESC_PROD ILIKE :product_like)\nGROUP BY UPPER(i.DESC_PROD)\nORDER BY QUANTIDADE_VENDIDA DESC\nLIMIT :limit"
+    },
+
+    {
+      "id": "bottom_produtos_quantidade_periodo",
+      "title": "Bottom N produtos por quantidade no periodo",
+      "description": "Produtos com menor quantidade vendida no periodo para um CNPJ.",
+      "metric": "quantidade",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["produtos", "bottom", "quantidade"],
+      "aliases": [
+        "produtos menos vendidos",
+        "piores produtos em quantidade",
+        "bottom produtos em unidades"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "limit"],
+      "optional_params": ["product_like"],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "limit": "int", "product_like": "string" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  UPPER(i.DESC_PROD) AS PRODUTO,\n  SUM(CAST(i.QUANTIDADE_COMPRADA AS DECIMAL(15,2))) AS QUANTIDADE_VENDIDA\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n  AND (:product_like IS NULL OR i.DESC_PROD ILIKE :product_like)\nGROUP BY UPPER(i.DESC_PROD)\nORDER BY QUANTIDADE_VENDIDA ASC\nLIMIT :limit"
+    },
+
+    {
+      "id": "produto_quantidade_por_nome_periodo",
+      "title": "Quantidade vendida de um produto especifico no periodo",
+      "description": "Retorna quantidade vendida do(s) produto(s) que casam com um termo no periodo.",
+      "metric": "quantidade",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["produto", "quantidade", "filtro_nome"],
+      "aliases": [
+        "quantidade vendida de",
+        "quantas unidades vendi de",
+        "vendi quantos de"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "product_like"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "product_like": "string" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  UPPER(i.DESC_PROD) AS PRODUTO,\n  SUM(CAST(i.QUANTIDADE_COMPRADA AS DECIMAL(15,2))) AS QUANTIDADE_VENDIDA\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND :product_like IS NOT NULL\n  AND UPPER(TRIM(COALESCE(i.DESC_PROD, ''))) LIKE CONCAT('%', UPPER(TRIM(:product_like)), '%')\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY UPPER(i.DESC_PROD)\nORDER BY QUANTIDADE_VENDIDA DESC"
+    },
+
+    {
+      "id": "ticket_medio_cliente_mes",
+      "title": "Ticket medio do mes",
+      "description": "Ticket medio do estabelecimento em um mes (tabela de agregados mensais).",
+      "metric": "ticket_medio",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["ticket", "mensal"],
+      "aliases": [
+        "ticket medio",
+        "ticket médio",
+        "valor medio por venda",
+        "media por compra"
+      ],
+      "required_params": ["cnpj", "dt_ini"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date" },
+      "rewrite_hints": [
+        "Para perguntas mensais, dt_ini deve ser o primeiro dia do mes desejado."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.nova_mvp_vendas"],
+      "only_select": true,
+      "sql_template": "SELECT\n  v.TICKET_MEDIO_CLIENTE AS TICKET_MEDIO\nFROM imaiscatalog.gold_prod.nova_mvp_vendas v\nWHERE v.CNPJ = :cnpj\n  AND date_trunc('month', to_date(  CASE    WHEN length(cast(v.ANO_MES as string)) = 7 THEN concat(cast(v.ANO_MES as string), '-01')    ELSE cast(v.ANO_MES as string)  END)) = date_trunc('month', to_date(:dt_ini))\nLIMIT 1"
+    },
+
+    {
+      "id": "qtd_transacoes_periodo",
+      "title": "Quantidade de transacoes no periodo",
+      "description": "Conta distinct de NOTAS no periodo (transacoes).",
+      "metric": "transacoes",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["transacoes", "notas", "periodo"],
+      "aliases": [
+        "quantas vendas",
+        "quantas transacoes",
+        "quantidade de notas",
+        "numero de vendas"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  COUNT(DISTINCT i.NOTAS) AS QUANTIDADE_DE_TRANSACOES\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)"
+    },
+
+    {
+      "id": "qtd_transacoes_mes_ate_hoje",
+      "title": "Quantidade de transacoes no mes ate hoje",
+      "description": "Conta transacoes do mes corrente ate hoje (ou ate dt_fim se a IA ajustar).",
+      "metric": "transacoes",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["transacoes", "mes_atual"],
+      "aliases": [
+        "quantas vendas fiz ate agora esse mes",
+        "quantas transacoes ate hoje",
+        "quantidade de vendas no mes ate hoje"
+      ],
+      "required_params": ["cnpj"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string" },
+      "rewrite_hints": [
+        "Para 'mes ate hoje', usar date_trunc('month', current_date()) ate current_date()."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  COUNT(DISTINCT i.NOTAS) AS QUANTIDADE_DE_TRANSACOES\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN date_trunc('month', current_date()) AND current_date()"
+    },
+
+    {
+      "id": "faturamento_mes_a_mes_periodo",
+      "title": "Faturamento mes a mes no periodo",
+      "description": "Serie mensal de faturamento no periodo.",
+      "metric": "faturamento",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["faturamento", "mensal", "serie"],
+      "aliases": [
+        "mes a mes",
+        "mensal",
+        "evolucao mensal",
+        "faturamento por mes"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') AS MES_REFERENCIA,\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_VENDIDO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM')\nORDER BY MES_REFERENCIA"
+    },
+
+    {
+      "id": "queda_ou_aumento_mes_a_mes_2_periodos",
+      "title": "Queda ou aumento entre dois meses (absoluto e percentual)",
+      "description": "Compara dois meses (ou dois periodos) e retorna diferenca e tendencia.",
+      "metric": "faturamento",
+      "grain": "comparacao",
+      "scope": "store",
+      "comparison": "period_vs_period",
+      "tags": ["comparacao", "queda", "aumento", "percentual"],
+      "aliases": [
+        "houve queda ou aumento",
+        "comparar dois meses",
+        "diferenca entre meses",
+        "variacao percentual entre meses"
+      ],
+      "required_params": ["cnpj", "dt_ini_1", "dt_fim_1", "dt_ini_2", "dt_fim_2"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini_1": "date", "dt_fim_1": "date", "dt_ini_2": "date", "dt_fim_2": "date" },
+      "rewrite_hints": [
+        "Se usuario disser 'mes atual vs mes passado', preencher periodos automaticamente.",
+        "Se usuario passar dois meses por nome (ex: fevereiro e marco), mapear cada um para seu range."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH p1 AS (\n  SELECT SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_1\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_1) AND to_date(:dt_fim_1)\n),\np2 AS (\n  SELECT SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_2\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_2) AND to_date(:dt_fim_2)\n)\nSELECT\n  p1.VALOR_1 AS VALOR_PERIODO_1,\n  p2.VALOR_2 AS VALOR_PERIODO_2,\n  (p2.VALOR_2 - p1.VALOR_1) AS DIFERENCA_ABSOLUTA,\n  ROUND(100.0 * (p2.VALOR_2 - p1.VALOR_1) / NULLIF(p1.VALOR_1, 0), 2) AS VARIACAO_PERCENTUAL,\n  CASE\n    WHEN p2.VALOR_2 > p1.VALOR_1 THEN 'AUMENTO'\n    WHEN p2.VALOR_2 < p1.VALOR_1 THEN 'QUEDA'\n    ELSE 'ESTAVEL'\n  END AS TENDENCIA\nFROM p1 CROSS JOIN p2"
+    },
+
+    {
+      "id": "top_produtos_maior_queda_faturamento_2_periodos",
+      "title": "Top N produtos com maior queda de faturamento entre dois periodos",
+      "description": "Ranking de produtos com maior queda (periodo 1 - periodo 2).",
+      "metric": "faturamento",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "period_vs_period",
+      "tags": ["produtos", "queda", "comparacao", "top"],
+      "aliases": [
+        "produtos com maior queda",
+        "mais cairam no faturamento",
+        "queda de faturamento por produto",
+        "comparar produtos entre dois meses"
+      ],
+      "required_params": ["cnpj", "dt_ini_1", "dt_fim_1", "dt_ini_2", "dt_fim_2", "limit"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini_1": "date", "dt_fim_1": "date", "dt_ini_2": "date", "dt_fim_2": "date", "limit": "int" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH p1 AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_1\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_1) AND to_date(:dt_fim_1)\n  GROUP BY UPPER(i.DESC_PROD)\n),\np2 AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_2\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_2) AND to_date(:dt_fim_2)\n  GROUP BY UPPER(i.DESC_PROD)\n),\nbase AS (\n  SELECT\n    p1.PRODUTO,\n    p1.VALOR_1,\n    p2.VALOR_2,\n    (p1.VALOR_1 - p2.VALOR_2) AS QUEDA_ABSOLUTA\n  FROM p1\n  INNER JOIN p2 ON p1.PRODUTO = p2.PRODUTO\n)\nSELECT\n  PRODUTO,\n  VALOR_1 AS VALOR_PERIODO_1,\n  VALOR_2 AS VALOR_PERIODO_2,\n  QUEDA_ABSOLUTA\nFROM base\nORDER BY QUEDA_ABSOLUTA DESC\nLIMIT :limit"
+    },
+
+    {
+      "id": "tendencia_vendas_mensais_produto_mm6",
+      "title": "Tendencia mensal de um produto com media movel 6 meses",
+      "description": "Serie mensal (valor) de um produto e comparacao com media movel 6m (janela fixa).",
+      "metric": "faturamento",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["tendencia", "media_movel", "produto", "mensal"],
+      "aliases": [
+        "tendencia do produto",
+        "media movel",
+        "tendencia mensal",
+        "produto acima da media"
+      ],
+      "required_params": ["cnpj", "product_like", "months_back"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "product_like": "string", "months_back": "int" },
+      "rewrite_hints": [
+        "months_back define quantos meses olhar para tras a partir do inicio do mes atual.",
+        "Para manter 6m, janela usa ROWS BETWEEN 5 PRECEDING AND CURRENT ROW."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH vendas_mensais AS (\n  SELECT\n    date_trunc('month', to_date(i.DATA_EMISSAO)) AS MES,\n    SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND i.DESC_PROD ILIKE :product_like\n    AND to_date(i.DATA_EMISSAO) >= date_trunc('month', add_months(current_date(), -:months_back))\n  GROUP BY date_trunc('month', to_date(i.DATA_EMISSAO))\n),\nmm AS (\n  SELECT\n    MES,\n    VALOR,\n    AVG(VALOR) OVER (ORDER BY MES ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) AS MEDIA_MOVEL_6M\n  FROM vendas_mensais\n)\nSELECT\n  date_format(MES, 'yyyy-MM') AS MES,\n  VALOR,\n  MEDIA_MOVEL_6M,\n  CASE WHEN VALOR > MEDIA_MOVEL_6M THEN 'ACIMA' ELSE 'ABAIXO' END AS TENDENCIA\nFROM mm\nORDER BY MES DESC"
+    },
+
+    {
+      "id": "top_categorias_faturamento_mes",
+      "title": "Top N categorias por faturamento no mes",
+      "description": "Ranking de categorias por valor vendido em um mes.",
+      "metric": "faturamento",
+      "grain": "categoria",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["categoria", "top", "faturamento"],
+      "aliases": [
+        "top categorias",
+        "categorias com maior faturamento",
+        "melhores categorias"
+      ],
+      "required_params": ["cnpj", "dt_ini", "limit"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "limit": "int" },
+      "rewrite_hints": [
+        "dt_ini deve ser o primeiro dia do mes desejado; o SQL filtra o mes inteiro via date_trunc."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  UPPER(i.CATEGORIA) AS CATEGORIA,\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND date_trunc('month', to_date(i.DATA_EMISSAO)) = date_trunc('month', to_date(:dt_ini))\nGROUP BY UPPER(i.CATEGORIA)\nORDER BY FATURAMENTO DESC\nLIMIT :limit"
+    },
+
+    {
+      "id": "top_produtos_regiao_faturamento_periodo",
+      "title": "Top N produtos por faturamento na regiao (mesma UF) no periodo",
+      "description": "Ranking de produtos na UF do estabelecimento (mercado na mesma UF) no periodo.",
+      "metric": "faturamento",
+      "grain": "produto",
+      "scope": "region",
+      "comparison": "none",
+      "tags": ["mercado", "uf", "top", "produtos"],
+      "aliases": [
+        "produtos que mais venderam na regiao",
+        "top produtos na uf",
+        "mais vendidos na minha regiao"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "limit"],
+      "optional_params": ["min_shops"],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "limit": "int", "min_shops": "int" },
+      "rewrite_hints": [
+        "Este template inclui o proprio estabelecimento; o compiler pode excluir (i.CNPJ <> :cnpj) se a pergunta for explicitamente 'mercado'."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH uf_loja AS (\n  SELECT UF AS UF\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios\n  WHERE CNPJ = :cnpj\n  LIMIT 1\n)\nSELECT\n  UPPER(i.DESC_PROD) AS PRODUTO,\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nCROSS JOIN uf_loja u\nWHERE i.UF = u.UF\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY UPPER(i.DESC_PROD)\nORDER BY FATURAMENTO DESC\nLIMIT :limit"
+    },
+
+    {
+      "id": "bottom_produtos_regiao_faturamento_periodo",
+      "title": "Bottom N produtos por faturamento na regiao (mesma UF) no periodo",
+      "description": "Produtos com menor faturamento na UF do estabelecimento no periodo.",
+      "metric": "faturamento",
+      "grain": "produto",
+      "scope": "region",
+      "comparison": "none",
+      "tags": ["mercado", "uf", "bottom", "produtos"],
+      "aliases": [
+        "produtos que menos venderam na regiao",
+        "piores produtos na uf",
+        "menos vendidos na minha regiao"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "limit"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "limit": "int" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH uf_loja AS (\n  SELECT UF AS UF\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios\n  WHERE CNPJ = :cnpj\n  LIMIT 1\n)\nSELECT\n  UPPER(i.DESC_PROD) AS PRODUTO,\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nCROSS JOIN uf_loja u\nWHERE i.UF = u.UF\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY UPPER(i.DESC_PROD)\nORDER BY FATURAMENTO ASC\nLIMIT :limit"
+    },
+
+    {
+      "id": "preco_compare_top_produtos_mercado_30d",
+      "title": "Comparacao de preco (loja vs mercado) para top N produtos 30d",
+      "description": "Compara preco medio da loja vs mediana do mercado na mesma janela de 30 dias para top produtos por faturamento.",
+      "metric": "preco",
+      "grain": "produto",
+      "scope": "market_vs_store",
+      "comparison": "market_vs_store",
+      "tags": ["preco", "mercado", "comparacao", "mediana"],
+      "aliases": [
+        "comparar preco com mercado",
+        "preco vs mercado",
+        "estou caro ou barato no mercado",
+        "acima da mediana do mercado"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "limit", "min_shops"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "limit": "int", "min_shops": "int" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH top_produtos AS (\n  SELECT\n    i.DESC_PROD,\n    SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS TOTAL_VENDIDO\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n  GROUP BY i.DESC_PROD\n  ORDER BY TOTAL_VENDIDO DESC\n  LIMIT :limit\n),\npreco_loja AS (\n  SELECT\n    i.DESC_PROD,\n    AVG(CAST(i.VALOR_UNITARIO AS DOUBLE)) AS PRECO_MEDIO_LOJA\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND i.DESC_PROD IN (SELECT DESC_PROD FROM top_produtos)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n    AND i.VALOR_UNITARIO IS NOT NULL\n  GROUP BY i.DESC_PROD\n),\npreco_mercado AS (\n  SELECT\n    i.DESC_PROD,\n    AVG(CAST(i.VALOR_UNITARIO AS DOUBLE)) AS PRECO_MEDIO_MERCADO,\n    percentile_approx(CAST(i.VALOR_UNITARIO AS DOUBLE), 0.5) AS PRECO_MEDIANA_MERCADO,\n    COUNT(DISTINCT i.CNPJ) AS QTDE_LOJAS\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ <> :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND i.DESC_PROD IN (SELECT DESC_PROD FROM top_produtos)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n    AND i.VALOR_UNITARIO IS NOT NULL\n  GROUP BY i.DESC_PROD\n  HAVING COUNT(DISTINCT i.CNPJ) >= :min_shops\n)\nSELECT\n  UPPER(l.DESC_PROD) AS PRODUTO,\n  l.PRECO_MEDIO_LOJA,\n  m.PRECO_MEDIO_MERCADO,\n  m.PRECO_MEDIANA_MERCADO,\n  ROUND(100.0 * (l.PRECO_MEDIO_LOJA - m.PRECO_MEDIANA_MERCADO) / NULLIF(m.PRECO_MEDIANA_MERCADO, 0), 2) AS DIF_PERCENTUAL\nFROM preco_loja l\nJOIN preco_mercado m ON l.DESC_PROD = m.DESC_PROD\nORDER BY DIF_PERCENTUAL DESC"
+    },
+
+    {
+      "id": "preco_por_uf_vs_mercado_termo_periodo",
+      "title": "Preco por UF (loja vs mercado) para um termo de produto no periodo",
+      "description": "Compara preco do termo do produto por UF, loja vs mercado (mediana).",
+      "metric": "preco",
+      "grain": "uf",
+      "scope": "market_vs_store",
+      "comparison": "market_vs_store",
+      "tags": ["preco", "uf", "mercado", "termo"],
+      "aliases": [
+        "preco por uf",
+        "preco por estado",
+        "comparar preco por uf",
+        "preco do produto por uf"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "product_like", "min_shops"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date", "product_like": "string", "min_shops": "int" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH loja AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    i.UF AS UF,\n    AVG(CAST(i.VALOR_UNITARIO AS DOUBLE)) AS PRECO_LOJA\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND i.DESC_PROD ILIKE :product_like\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n    AND i.VALOR_UNITARIO IS NOT NULL\n  GROUP BY UPPER(i.DESC_PROD), i.UF\n),\nmercado AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    i.UF AS UF,\n    AVG(CAST(i.VALOR_UNITARIO AS DOUBLE)) AS PRECO_MEDIO_MERCADO,\n    percentile_approx(CAST(i.VALOR_UNITARIO AS DOUBLE), 0.5) AS MEDIANA_MERCADO,\n    COUNT(DISTINCT i.CNPJ) AS QTDE_LOJAS\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ <> :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND i.DESC_PROD ILIKE :product_like\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\n    AND i.VALOR_UNITARIO IS NOT NULL\n  GROUP BY UPPER(i.DESC_PROD), i.UF\n  HAVING COUNT(DISTINCT i.CNPJ) >= :min_shops\n)\nSELECT\n  l.UF,\n  l.PRECO_LOJA,\n  m.PRECO_MEDIO_MERCADO,\n  m.MEDIANA_MERCADO,\n  ROUND(100.0 * (l.PRECO_LOJA - m.MEDIANA_MERCADO) / NULLIF(m.MEDIANA_MERCADO, 0), 2) AS DIF_PERCENTUAL\nFROM loja l\nJOIN mercado m ON l.PRODUTO = m.PRODUTO AND l.UF = m.UF\nORDER BY DIF_PERCENTUAL DESC"
+    },
+
+    {
+      "id": "produtos_aumento_preco_ate_100_2_meses",
+      "title": "Produtos com aumento de preco ate 100% entre dois meses",
+      "description": "Calcula preco medio em dois meses e filtra aumento ate 2x.",
+      "metric": "preco",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "period_vs_period",
+      "tags": ["preco", "aumento", "comparacao", "produto"],
+      "aliases": [
+        "aumento de preco",
+        "produtos que aumentaram",
+        "subiu o preco de",
+        "maiores aumentos de preco"
+      ],
+      "required_params": ["cnpj", "dt_ini_1", "dt_fim_1", "dt_ini_2", "dt_fim_2", "limit"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini_1": "date", "dt_fim_1": "date", "dt_ini_2": "date", "dt_fim_2": "date", "limit": "int" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH precos AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    AVG(CASE WHEN to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_1) AND to_date(:dt_fim_1)\n             AND i.VALOR_UNITARIO BETWEEN 0.50 AND 1000\n             THEN CAST(i.VALOR_UNITARIO AS DOUBLE) END) AS PRECO_P1,\n    AVG(CASE WHEN to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_2) AND to_date(:dt_fim_2)\n             AND i.VALOR_UNITARIO BETWEEN 0.50 AND 1000\n             THEN CAST(i.VALOR_UNITARIO AS DOUBLE) END) AS PRECO_P2\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND i.VALOR_UNITARIO IS NOT NULL\n  GROUP BY UPPER(i.DESC_PROD)\n)\nSELECT\n  PRODUTO,\n  PRECO_P1,\n  PRECO_P2,\n  ROUND(TRY_DIVIDE(PRECO_P2, PRECO_P1), 2) AS MULTIPLICADOR\nFROM precos\nWHERE PRECO_P1 IS NOT NULL\n  AND PRECO_P2 IS NOT NULL\n  AND TRY_DIVIDE(PRECO_P2, PRECO_P1) > 1.0\n  AND TRY_DIVIDE(PRECO_P2, PRECO_P1) <= 2.0\nORDER BY MULTIPLICADOR DESC\nLIMIT :limit"
+    },
+
+    {
+      "id": "produtos_maior_queda_preco_2_meses",
+      "title": "Top N produtos com maior queda de preco entre dois meses",
+      "description": "Compara preco medio e retorna os que mais caíram (percentual).",
+      "metric": "preco",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "period_vs_period",
+      "tags": ["preco", "queda", "comparacao", "produto"],
+      "aliases": [
+        "queda de preco",
+        "produtos que ficaram mais baratos",
+        "maior queda de preco"
+      ],
+      "required_params": ["cnpj", "dt_ini_1", "dt_fim_1", "dt_ini_2", "dt_fim_2", "limit"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini_1": "date", "dt_fim_1": "date", "dt_ini_2": "date", "dt_fim_2": "date", "limit": "int" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH precos AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    AVG(CASE WHEN to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_1) AND to_date(:dt_fim_1)\n             AND i.VALOR_UNITARIO BETWEEN 0.50 AND 1000\n             THEN CAST(i.VALOR_UNITARIO AS DOUBLE) END) AS PRECO_P1,\n    AVG(CASE WHEN to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_2) AND to_date(:dt_fim_2)\n             AND i.VALOR_UNITARIO BETWEEN 0.50 AND 1000\n             THEN CAST(i.VALOR_UNITARIO AS DOUBLE) END) AS PRECO_P2\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND i.VALOR_UNITARIO IS NOT NULL\n  GROUP BY UPPER(i.DESC_PROD)\n)\nSELECT\n  PRODUTO,\n  PRECO_P1,\n  PRECO_P2,\n  ROUND(PRECO_P2 - PRECO_P1, 2) AS DIFERENCA,\n  ROUND(100.0 * (PRECO_P2 - PRECO_P1) / NULLIF(PRECO_P1, 0), 2) AS VARIACAO_PERC\nFROM precos\nWHERE PRECO_P1 IS NOT NULL\n  AND PRECO_P2 IS NOT NULL\n  AND PRECO_P2 < PRECO_P1\nORDER BY VARIACAO_PERC ASC\nLIMIT :limit"
+    },
+
+    {
+      "id": "certificado_validade_cnpj",
+      "title": "Validade do certificado digital (data fim)",
+      "description": "Retorna a data maxima de validade do certificado do CNPJ.",
+      "metric": "certificado",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["certificado", "validade"],
+      "aliases": [
+        "certificado vence quando",
+        "validade do certificado",
+        "certificado digital",
+        "e-cnpj vence"
+      ],
+      "required_params": ["cnpj"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string" },
+      "allowed_tables": ["imaiscatalog.bronze_prod.cadcrfclitgv"],
+      "only_select": true,
+      "sql_template": "SELECT\n  lpad(cast(cert.NUMCGCCLI as string), 14, '0') AS CNPJ,\n  max(to_date(cert.DATFIMVLDINF)) AS DT_FIM_VALIDADE\nFROM imaiscatalog.bronze_prod.cadcrfclitgv cert\nWHERE lpad(cast(cert.NUMCGCCLI as string), 14, '0') = :cnpj\nGROUP BY 1"
+    },
+
+    {
+      "id": "certificado_status_cnpj",
+      "title": "Status do certificado (expirado e dias vencido)",
+      "description": "Mostra se esta expirado e quantos dias vencido, baseado na data fim.",
+      "metric": "certificado",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["certificado", "status", "vencido"],
+      "aliases": [
+        "certificado expirado",
+        "certificado esta vencido",
+        "status do certificado"
+      ],
+      "required_params": ["cnpj"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string" },
+      "allowed_tables": ["imaiscatalog.bronze_prod.cadcrfclitgv"],
+      "only_select": true,
+      "sql_template": "WITH cert AS (\n  SELECT\n    lpad(cast(NUMCGCCLI as string), 14, '0') AS CNPJ,\n    max(to_date(DATFIMVLDINF)) AS DT_FIM_VALIDADE\n  FROM imaiscatalog.bronze_prod.cadcrfclitgv\n  WHERE lpad(cast(NUMCGCCLI as string), 14, '0') = :cnpj\n  GROUP BY 1\n)\nSELECT\n  CNPJ,\n  DT_FIM_VALIDADE,\n  CASE WHEN DT_FIM_VALIDADE < current_date() THEN 'SIM' ELSE 'NAO' END AS CERTIFICADO_EXPIRADO,\n  CASE WHEN DT_FIM_VALIDADE < current_date() THEN datediff(current_date(), DT_FIM_VALIDADE) ELSE 0 END AS DIAS_VENCIDO\nFROM cert"
+    },
+
+    {
+      "id": "certificados_vencidos_top",
+      "title": "Top N certificados vencidos (mais recentes)",
+      "description": "Lista certificados vencidos e dias vencido.",
+      "metric": "certificado",
+      "grain": "cnpj",
+      "scope": "global",
+      "comparison": "none",
+      "tags": ["certificado", "vencidos", "top"],
+      "aliases": [
+        "top certificados vencidos",
+        "certificados expirados",
+        "lista certificados vencidos"
+      ],
+      "required_params": ["limit"],
+      "optional_params": [],
+      "param_types": { "limit": "int" },
+      "allowed_tables": ["imaiscatalog.bronze_prod.cadcrfclitgv"],
+      "only_select": true,
+      "sql_template": "WITH cert AS (\n  SELECT\n    lpad(cast(NUMCGCCLI as string), 14, '0') AS CNPJ,\n    max(to_date(DATFIMVLDINF)) AS DT_FIM_VALIDADE\n  FROM imaiscatalog.bronze_prod.cadcrfclitgv\n  GROUP BY 1\n)\nSELECT\n  CNPJ,\n  DT_FIM_VALIDADE,\n  datediff(current_date(), DT_FIM_VALIDADE) AS DIAS_VENCIDO\nFROM cert\nWHERE DT_FIM_VALIDADE < current_date()\nORDER BY DT_FIM_VALIDADE DESC\nLIMIT :limit"
+    },
+
+    {
+      "id": "certificados_a_vencer_30d_top",
+      "title": "Top N certificados a vencer em 30 dias",
+      "description": "Lista certificados que vencem nos proximos 30 dias.",
+      "metric": "certificado",
+      "grain": "cnpj",
+      "scope": "global",
+      "comparison": "none",
+      "tags": ["certificado", "a_vencer"],
+      "aliases": [
+        "certificados a vencer",
+        "certificados vencem em 30 dias",
+        "lista certificados a vencer"
+      ],
+      "required_params": ["limit"],
+      "optional_params": [],
+      "param_types": { "limit": "int" },
+      "allowed_tables": ["imaiscatalog.bronze_prod.cadcrfclitgv"],
+      "only_select": true,
+      "sql_template": "WITH cert AS (\n  SELECT\n    lpad(cast(NUMCGCCLI as string), 14, '0') AS CNPJ,\n    max(to_date(DATFIMVLDINF)) AS DT_FIM_VALIDADE\n  FROM imaiscatalog.bronze_prod.cadcrfclitgv\n  GROUP BY 1\n)\nSELECT\n  CNPJ,\n  DT_FIM_VALIDADE,\n  datediff(DT_FIM_VALIDADE, current_date()) AS DIAS_PARA_VENCER\nFROM cert\nWHERE DT_FIM_VALIDADE >= current_date()\n  AND DT_FIM_VALIDADE <= date_add(current_date(), 30)\nORDER BY DT_FIM_VALIDADE ASC\nLIMIT :limit"
+    },
+    {
+      "id": "comparar_top_produtos_quantidade_2_periodos",
+      "title": "Comparar top produtos por quantidade entre dois periodos",
+      "description": "Compara a quantidade vendida por produto entre dois periodos e retorna ranking com os volumes dos dois lados.",
+      "metric": "quantidade",
+      "grain": "produto",
+      "scope": "store",
+      "comparison": "period_vs_period",
+      "tags": ["produto", "quantidade", "comparacao", "top", "ranking"],
+      "aliases": [
+        "compare os produtos mais vendidos",
+        "comparar produtos mais vendidos",
+        "produtos mais vendidos entre dois periodos",
+        "comparar top produtos por quantidade",
+        "comparacao de produtos vendidos"
+      ],
+      "required_params": ["cnpj", "dt_ini_1", "dt_fim_1", "dt_ini_2", "dt_fim_2", "limit"],
+      "optional_params": ["product_like"],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini_1": "date",
+        "dt_fim_1": "date",
+        "dt_ini_2": "date",
+        "dt_fim_2": "date",
+        "limit": "int",
+        "product_like": "string"
+      },
+      "rewrite_hints": [
+        "Usar dt_ini_1/dt_fim_1 para o primeiro periodo e dt_ini_2/dt_fim_2 para o segundo.",
+        "Se o usuario pedir comparacao entre dois periodos, preferir esta query em vez da query simples de um periodo."
+      ],
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "WITH p1 AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    SUM(CAST(i.QUANTIDADE_COMPRADA AS DECIMAL(15,2))) AS QTD_P1\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_1) AND to_date(:dt_fim_1)\n    AND (:product_like IS NULL OR i.DESC_PROD ILIKE :product_like)\n  GROUP BY UPPER(i.DESC_PROD)\n),\np2 AS (\n  SELECT\n    UPPER(i.DESC_PROD) AS PRODUTO,\n    SUM(CAST(i.QUANTIDADE_COMPRADA AS DECIMAL(15,2))) AS QTD_P2\n  FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\n  WHERE i.CNPJ = :cnpj\n    AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n    AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini_2) AND to_date(:dt_fim_2)\n    AND (:product_like IS NULL OR i.DESC_PROD ILIKE :product_like)\n  GROUP BY UPPER(i.DESC_PROD)\n)\nSELECT\n  COALESCE(p1.PRODUTO, p2.PRODUTO) AS PRODUTO,\n  COALESCE(p1.QTD_P1, 0) AS QUANTIDADE_PERIODO_1,\n  COALESCE(p2.QTD_P2, 0) AS QUANTIDADE_PERIODO_2,\n  COALESCE(p2.QTD_P2, 0) - COALESCE(p1.QTD_P1, 0) AS DIFERENCA\nFROM p1\nFULL OUTER JOIN p2\n  ON p1.PRODUTO = p2.PRODUTO\nORDER BY (COALESCE(p1.QTD_P1, 0) + COALESCE(p2.QTD_P2, 0)) DESC\nLIMIT :limit"
+    },
+    {
+      "id": "melhor_mes_ano_passado",
+      "title": "Melhor mês do ano passado por faturamento",
+      "description": "Retorna o mês do ano anterior com maior faturamento.",
+      "metric": "faturamento",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["melhor", "mes", "ano passado", "faturamento"],
+      "aliases": ["melhor mes ano passado", "qual foi meu melhor mes ano passado", "mês que mais vendeu ano passado"],
+      "required_params": ["cnpj"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') AS MES, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND year(to_date(i.DATA_EMISSAO)) = year(current_date()) - 1 GROUP BY date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') ORDER BY FATURAMENTO DESC LIMIT 1"
+    },
+    {
+      "id": "melhor_dia_periodo",
+      "title": "Melhor dia do período por faturamento",
+      "description": "Retorna o dia com maior faturamento no período informado.",
+      "metric": "faturamento",
+      "grain": "dia",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["melhor", "dia", "faturamento"],
+      "aliases": ["melhor dia", "dia que mais vendeu", "dia que mais faturou"],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT to_date(i.DATA_EMISSAO) AS DIA, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim) GROUP BY to_date(i.DATA_EMISSAO) ORDER BY FATURAMENTO DESC LIMIT 1"
+    },
+    {
+      "id": "pior_dia_periodo",
+      "title": "Pior dia do periodo por faturamento",
+      "description": "Retorna o dia com menor faturamento no periodo informado.",
+      "metric": "faturamento",
+      "grain": "dia",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["pior", "dia", "faturamento", "bottom"],
+      "aliases": ["dia que menos vendeu", "dia que menos faturou", "pior dia"],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string", "dt_ini": "date", "dt_fim": "date" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT to_date(i.DATA_EMISSAO) AS DIA, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim) GROUP BY to_date(i.DATA_EMISSAO) ORDER BY FATURAMENTO ASC LIMIT 1"
+    },
+    {
+      "id": "melhor_mes_ano_passado",
+      "title": "Melhor mes do ano passado por faturamento",
+      "description": "Retorna o mes do ano anterior com maior faturamento.",
+      "metric": "faturamento",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["melhor", "mes", "ano passado", "faturamento", "top"],
+      "aliases": ["melhor mes ano passado", "qual foi meu melhor mes ano passado", "mes que mais vendeu ano passado"],
+      "required_params": ["cnpj"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') AS MES, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND year(to_date(i.DATA_EMISSAO)) = year(current_date()) - 1 GROUP BY date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') ORDER BY FATURAMENTO DESC LIMIT 1"
+    },
+    {
+      "id": "pior_mes_ano_passado",
+      "title": "Pior mes do ano passado por faturamento",
+      "description": "Retorna o mes do ano anterior com menor faturamento.",
+      "metric": "faturamento",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["pior", "mes", "ano passado", "faturamento", "bottom"],
+      "aliases": ["pior mes ano passado", "qual foi meu pior mes ano passado", "mes que menos vendeu ano passado"],
+      "required_params": ["cnpj"],
+      "optional_params": [],
+      "param_types": { "cnpj": "string" },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') AS MES, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND year(to_date(i.DATA_EMISSAO)) = year(current_date()) - 1 GROUP BY date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') ORDER BY FATURAMENTO ASC LIMIT 1"
+    },
+    {
+      "id": "faturamento_semanal_periodo",
+      "title": "Faturamento semanal no periodo",
+      "description": "Agrupa faturamento por semana dentro do periodo",
+      "metric": "faturamento",
+      "grain": "semana",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["faturamento", "semana", "serie"],
+      "aliases": [
+        "faturamento semanal",
+        "faturamento por semana",
+        "quanto vendi por semana"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT date_format(date_trunc('week', to_date(i.DATA_EMISSAO)), 'yyyy-MM-dd') AS SEMANA, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim) GROUP BY date_format(date_trunc('week', to_date(i.DATA_EMISSAO)), 'yyyy-MM-dd') ORDER BY SEMANA"
+    },
+    {
+      "id": "categoria_quantidade_periodo",
+      "title": "Quantidade vendida por categoria no periodo",
+      "description": "Soma a quantidade vendida para uma categoria no periodo.",
+      "metric": "quantidade_vendida",
+      "grain": "categoria",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["categoria", "quantidade", "periodo"],
+      "aliases": [
+        "quantidade vendida da categoria",
+        "quantidade da categoria",
+        "quanto vendi da categoria",
+        "unidades da categoria"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "category"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date",
+        "category": "string"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  UPPER(i.CATEGORIA) AS CATEGORIA,\n  SUM(CAST(i.QUANTIDADE_COMPRADA AS DECIMAL(15,2))) AS QUANTIDADE_VENDIDA\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND :category IS NOT NULL\n  AND UPPER(TRIM(COALESCE(i.CATEGORIA, ''))) LIKE CONCAT('%', UPPER(TRIM(:category)), '%')\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY UPPER(i.CATEGORIA)"
+    },
+    {
+      "id": "categoria_faturamento_periodo",
+      "title": "Faturamento da categoria no período",
+      "description": "Retorna o faturamento de uma categoria específica em um período.",
+      "aliases": [
+        "faturamento da categoria",
+        "valor vendido da categoria",
+        "total vendido da categoria",
+        "receita da categoria"
+      ],
+      "tags": [
+        "categoria",
+        "faturamento",
+        "valor",
+        "receita",
+        "periodo"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "category"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date",
+        "category": "string"
+      },
+      "allowed_tables": [
+        "imaiscatalog.gold_prod.mvp_dados_intermediarios"
+      ],
+      "sql_template": "SELECT UPPER(i.CATEGORIA) AS CATEGORIA, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND UPPER(TRIM(COALESCE(i.CATEGORIA, ''))) LIKE CONCAT('%', UPPER(TRIM(:category)), '%') AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim) GROUP BY UPPER(i.CATEGORIA)"
+    },
+    {
+      "id": "total_gasto_entrada_periodo",
+      "title": "Total gasto com notas de entrada no periodo",
+      "description": "Soma o valor das notas de entrada/compras no periodo.",
+      "metric": "gastos",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["entrada", "compras", "gastos"],
+      "aliases": [
+        "quanto gastei",
+        "quanto comprei",
+        "gastos com compras",
+        "valor das entradas",
+        "notas de entrada"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_GASTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND UPPER(COALESCE(i.TIPO_NOTA, '')) = 'ENTRADA'\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)"
+    },
+    {
+      "id": "ticket_medio_periodo",
+      "title": "Ticket medio no periodo",
+      "description": "Calcula o ticket medio no periodo com base no valor total vendido dividido pela quantidade de transacoes.",
+      "metric": "ticket_medio",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["ticket", "ticket_medio", "periodo"],
+      "aliases": [
+        "ticket medio no periodo",
+        "ticket medio dos ultimos dias",
+        "ticket medio da semana",
+        "ticket medio entre datas",
+        "valor medio por venda no periodo"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  ROUND(\n    SUM(CAST(i.VALOR AS DECIMAL(15,2))) / NULLIF(COUNT(DISTINCT i.NOTAS), 0),\n    2\n  ) AS TICKET_MEDIO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)"
+    },
+    {
+      "id": "melhor_mes_periodo",
+      "title": "Melhor mes por faturamento no periodo",
+      "description": "Retorna o mes com maior faturamento dentro do periodo informado.",
+      "metric": "faturamento",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["melhor_mes", "faturamento", "mensal"],
+      "aliases": [
+        "melhor mes",
+        "mes que mais vendeu",
+        "mes com maior faturamento",
+        "qual foi meu melhor mes"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') AS MES_REFERENCIA,\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM')\nORDER BY FATURAMENTO DESC\nLIMIT 1"
+    },
+    {
+      "id": "pior_mes_periodo",
+      "title": "Pior mes por faturamento no periodo",
+      "description": "Retorna o mes com menor faturamento dentro do periodo informado.",
+      "metric": "faturamento",
+      "grain": "mes",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["pior_mes", "faturamento", "mensal"],
+      "aliases": [
+        "pior mes",
+        "mes que menos vendeu",
+        "mes com menor faturamento",
+        "qual foi meu pior mes"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM') AS MES_REFERENCIA,\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY date_format(date_trunc('month', to_date(i.DATA_EMISSAO)), 'yyyy-MM')\nORDER BY FATURAMENTO ASC\nLIMIT 1"
+    },
+    {
+      "id": "categoria_quantidade_periodo",
+      "title": "Quantidade vendida por categoria no periodo",
+      "description": "Soma a quantidade vendida para uma categoria no periodo.",
+      "metric": "quantidade",
+      "grain": "categoria",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["categoria", "quantidade", "periodo"],
+      "aliases": [
+        "quantidade vendida da categoria",
+        "quantidade da categoria",
+        "quanto vendi da categoria",
+        "unidades da categoria"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "category"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date",
+        "category": "string"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  UPPER(i.CATEGORIA) AS CATEGORIA,\n  SUM(CAST(i.QUANTIDADE_COMPRADA AS DECIMAL(15,2))) AS QUANTIDADE_VENDIDA\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL)\n  AND UPPER(i.CATEGORIA) = UPPER(:category)\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)\nGROUP BY UPPER(i.CATEGORIA)"
+    },
+    {
+      "id": "total_gasto_entrada_periodo",
+      "title": "Total gasto com notas de entrada no periodo",
+      "description": "Soma o valor das notas de entrada ou compras no periodo.",
+      "metric": "gastos",
+      "grain": "total",
+      "scope": "store",
+      "comparison": "none",
+      "tags": ["entrada", "compras", "gastos"],
+      "aliases": [
+        "quanto gastei",
+        "quanto comprei",
+        "gastos com compras",
+        "valor das entradas",
+        "notas de entrada"
+      ],
+      "required_params": ["cnpj", "dt_ini", "dt_fim"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date"
+      },
+      "allowed_tables": ["imaiscatalog.gold_prod.mvp_dados_intermediarios"],
+      "only_select": true,
+      "sql_template": "SELECT\n  SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS VALOR_GASTO\nFROM imaiscatalog.gold_prod.mvp_dados_intermediarios i\nWHERE i.CNPJ = :cnpj\n  AND UPPER(COALESCE(i.TIPO_NOTA, '')) = 'ENTRADA'\n  AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim)"
+    },
+    {
+      "id": "marca_faturamento_periodo",
+      "title": "Faturamento por marca no período",
+      "description": "Retorna o faturamento total de uma marca específica em um período para o CNPJ informado.",
+      "sql_template": "SELECT UPPER(TRIM(COALESCE(i.MARCA, ''))) AS MARCA, SUM(CAST(i.VALOR AS DECIMAL(15,2))) AS FATURAMENTO FROM imaiscatalog.gold_prod.mvp_dados_intermediarios i WHERE i.CNPJ = :cnpj AND (i.TIPO_NOTA = 'SAIDA' OR i.TIPO_NOTA IS NULL) AND :brand IS NOT NULL AND UPPER(TRIM(COALESCE(i.MARCA, ''))) LIKE CONCAT('%', UPPER(TRIM(:brand)), '%') AND to_date(i.DATA_EMISSAO) BETWEEN to_date(:dt_ini) AND to_date(:dt_fim) GROUP BY UPPER(TRIM(COALESCE(i.MARCA, ''))) ORDER BY FATURAMENTO DESC",
+      "required_params": ["cnpj", "dt_ini", "dt_fim", "brand"],
+      "optional_params": [],
+      "param_types": {
+        "cnpj": "string",
+        "dt_ini": "date",
+        "dt_fim": "date",
+        "brand": "string"
+      },
+      "tags": ["faturamento", "marca", "periodo", "valor vendido"],
+      "aliases": [
+        "faturamento da marca",
+        "valor vendido da marca",
+        "quanto vendi da marca",
+        "receita da marca",
+        "faturamento por marca"
+      ]
+    }
+  ]
+}

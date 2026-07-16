@@ -1,0 +1,138 @@
+{
+  "version": "1.0.0",
+  "name": "BH Sellout Queries Catalog",
+  "dialect": "databricks_spark_sql",
+  "defaults": {
+    "table": "gold_prod.sellout_supermercado_bh",
+    "default_limit": 10,
+    "max_limit": 50
+  },
+  "queries": [
+    {
+      "id": "produto_mais_relevante",
+      "title": "Produto/marca mais relevante da subcategoria",
+      "description": "Retorna o produto+marca com maior faturamento em uma subcategoria.",
+      "metric": "relevancia",
+      "grain": "produto",
+      "tags": ["relevancia", "marca", "subcategoria", "mais vendido", "principal"],
+      "aliases": ["mais relevante", "principal marca", "principal produto", "produto mais vendido", "marca mais vendida", "marca mais relevante"]
+    },
+    {
+      "id": "marcas_regiao_exclusiva",
+      "title": "Marcas presentes em uma região e ausentes em outra",
+      "description": "Identifica marcas que existem na região X mas não na região Y.",
+      "metric": "presenca_regional",
+      "grain": "marca",
+      "tags": ["regiao", "presenca", "ausencia", "cobertura", "distribuicao"],
+      "aliases": ["marcas que tem na regiao", "nao temos", "marcas exclusivas", "marcas ausentes", "marcas que faltam"]
+    },
+    {
+      "id": "marca_mais_evoluiu",
+      "title": "Marca que mais evoluiu na região",
+      "description": "Compara faturamento mês atual vs mês anterior para ranquear marcas com maior crescimento.",
+      "metric": "evolucao",
+      "grain": "marca",
+      "tags": ["evolucao", "crescimento", "regiao", "variacao", "evoluiu"],
+      "aliases": ["mais evoluiu", "mais cresceu", "maior crescimento", "marca que mais evoluiu", "marca que mais cresceu"]
+    },
+    {
+      "id": "marcas_pareto_vendas",
+      "title": "Marcas que representam X% das vendas na categoria por região",
+      "description": "Análise de Pareto: marcas acumuladas que representam X% do faturamento por categoria e região.",
+      "metric": "pareto",
+      "grain": "marca",
+      "tags": ["pareto", "representatividade", "share", "80/20", "concentracao"],
+      "aliases": ["representam das vendas", "80% das vendas", "pareto", "concentracao de vendas", "share de vendas"]
+    },
+    {
+      "id": "maior_variacao_preco",
+      "title": "Produtos/marcas com maior variação de preço",
+      "description": "Identifica produtos com maior amplitude de preço praticado, removendo outliers via P10/P90.",
+      "metric": "variacao_preco",
+      "grain": "produto",
+      "tags": ["preco", "variacao", "amplitude", "dispersao", "oscilacao"],
+      "aliases": ["variacao no preco", "preco mais variou", "maior variacao de preco", "oscilacao de preco", "amplitude de preco"]
+    },
+    {
+      "id": "comparacao_formatos",
+      "title": "Comparação entre formatos/embalagens de produto",
+      "description": "Compara formatos de embalagem (ex: 150ml vs econômico) por preço/ml, volume e faturamento.",
+      "metric": "comparacao_formato",
+      "grain": "produto",
+      "tags": ["formato", "embalagem", "tamanho", "comparacao", "economico", "ml", "litros"],
+      "aliases": ["faz mais sentido ter", "compensar ter", "embalagem economica", "comparar formatos", "comparar embalagens", "150ml vs", "tamanho de embalagem"]
+    },
+    {
+      "id": "mix_ideal_subcategoria",
+      "title": "Mix ideal da subcategoria com top 3 marcas",
+      "description": "Identifica as 3 marcas líderes de uma subcategoria e lista seus produtos.",
+      "metric": "mix",
+      "grain": "marca",
+      "tags": ["mix", "ideal", "top 3", "marcas", "subcategoria", "sortimento"],
+      "aliases": ["mix ideal", "3 marcas", "mix da sub", "sortimento ideal", "quais marcas ter"]
+    },
+    {
+      "id": "preco_ideal_competitivo",
+      "title": "Preço ideal/competitivo do produto ou marca",
+      "description": "Calcula preço competitivo (mediana P50) por produto/marca, com faixas P25 e P75, removendo outliers.",
+      "metric": "preco_ideal",
+      "grain": "produto",
+      "tags": ["preco", "ideal", "competitivo", "mediana", "referencia", "benchmark"],
+      "aliases": ["preco ideal", "preco competitivo", "quanto cobrar", "preco de referencia", "preco sugerido", "preco praticado"]
+    },
+    {
+      "id": "penetracao_loja",
+      "title": "Penetração de marca/produto nas lojas",
+      "description": "Em quantas lojas (%) a marca ou produto está presente na subcategoria.",
+      "metric": "penetracao_loja",
+      "grain": "marca",
+      "tags": ["penetracao", "cobertura", "distribuicao", "lojas", "presenca"],
+      "aliases": ["em quantas lojas", "penetracao", "cobertura de lojas", "quantas lojas vendem", "onde esta presente", "distribuicao"]
+    },
+    {
+      "id": "concentracao_mercado",
+      "title": "Concentração do mercado na subcategoria",
+      "description": "Analisa se o mercado é concentrado (poucas marcas dominam) ou pulverizado.",
+      "metric": "concentracao_mercado",
+      "grain": "marca",
+      "tags": ["concentracao", "dominancia", "mercado", "hhi", "competicao"],
+      "aliases": ["concentrado", "quem domina", "mercado concentrado", "poucas marcas", "competicao", "monopolio"]
+    },
+    {
+      "id": "oportunidade_regional",
+      "title": "Oportunidades regionais (gap de faturamento)",
+      "description": "Identifica subcategorias com faturamento abaixo da média nacional em determinada região.",
+      "metric": "oportunidade_regional",
+      "grain": "regiao",
+      "tags": ["oportunidade", "gap", "regiao", "abaixo da media", "potencial"],
+      "aliases": ["oportunidade regional", "gap regional", "onde investir", "regiao fraca", "potencial por regiao"]
+    },
+    {
+      "id": "ranking_lojas",
+      "title": "Top lojas por faturamento na categoria",
+      "description": "Ranking de lojas com maior faturamento em uma categoria/subcategoria.",
+      "metric": "ranking_lojas",
+      "grain": "total",
+      "tags": ["lojas", "ranking", "top lojas", "maiores lojas", "faturamento por loja"],
+      "aliases": ["maiores lojas", "lojas que mais vendem", "top lojas", "ranking de lojas", "lojas por faturamento"]
+    },
+    {
+      "id": "posicionamento_preco",
+      "title": "Posicionamento de preço (premium/intermediário/econômico)",
+      "description": "Classifica marcas em faixas de preço com base no preço médio praticado.",
+      "metric": "posicionamento_preco",
+      "grain": "marca",
+      "tags": ["posicionamento", "premium", "economico", "faixa", "segmento"],
+      "aliases": ["posicionamento de preco", "marca premium", "marca economica", "faixa de preco", "segmento de preco", "premium ou economico"]
+    },
+    {
+      "id": "comparacao_regional",
+      "title": "Comparação de desempenho entre regiões",
+      "description": "Compara faturamento, volume e ticket médio entre regiões para uma categoria/subcategoria.",
+      "metric": "comparacao_regional",
+      "grain": "regiao",
+      "tags": ["comparacao", "regiao", "desempenho regional", "regiao vs regiao"],
+      "aliases": ["comparar regioes", "regiao vs regiao", "desempenho por regiao", "diferenca entre regioes"]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "tables": [
+    {
+      "name": "gold_prod.sellout_supermercado_bh",
+      "description": "Tabela de sellout de supermercados BH. Cada linha é um produto vendido em uma nota fiscal, com dados de loja, região e classificação de produto.",
+      "grain": "line_item",
+      "usage_notes": [
+        "NÃO existe coluna CNPJ de cliente. As consultas são sempre sobre o mercado completo, sem filtro por loja específica.",
+        "Para faturamento: SUM(VALOR_TOTAL). Para volume: SUM(QUANTIDADE_COMPRADA).",
+        "Para preço unitário: AVG(VALOR_UNITARIO) ou use PERCENTILE_CONT para mediana.",
+        "Hierarquia de produto: DEPARTAMENTO > SECAO > CATEGORIA > SUBCATEGORIA > MARCA > DESCRICAO_PRODUTO.",
+        "Hierarquia geográfica: NOMREGGEO > UF > NOMMSOREG > MUNICIPIO. ATENÇÃO: toda a base é de MG (NOMREGGEO='SUDESTE', UF='MG' em todas as linhas). A única dimensão geográfica variável é NOMMSOREG (mesorregião). Para análises regionais, use SEMPRE NOMMSOREG.",
+        "Para evolução temporal: use DHEMI (data de emissão)."
+      ],
+      "columns": [
+        { "name": "DHEMI",                "type": "date",      "description": "Data da emissão da nota fiscal." },
+        { "name": "CODIGO_GTIN",          "type": "string",    "description": "Código GTIN do produto." },
+        { "name": "DESCRICAO_PRODUTO",    "type": "string",    "description": "Descrição do produto." },
+        { "name": "MARCA",                "type": "string",    "description": "Marca do produto." },
+        { "name": "FABRICANTE",           "type": "string",    "description": "Fabricante do produto." },
+        { "name": "DEPARTAMENTO",         "type": "string",    "description": "Departamento do produto: ALIMENTAR ou NAO ALIMENTAR." },
+        { "name": "SECAO",               "type": "string",    "description": "Seção do produto (ex: LIMPEZA)." },
+        { "name": "CATEGORIA",           "type": "string",    "description": "Categoria do produto (ex: LIMPEZA PARA ROUPAS)." },
+        { "name": "SUBCATEGORIA",        "type": "string",    "description": "Subcategoria do produto (ex: AMACIANTE DE ROUPA)." },
+        { "name": "QUANTIDADE_DESCRITA",  "type": "string",    "description": "Quantidade descrita do produto na nota fiscal." },
+        { "name": "VALOR_MEDIDA",         "type": "string",    "description": "Medida do produto." },
+        { "name": "UNIDADE_DE_MEDIDA",    "type": "string",    "description": "Unidade de medida do produto." },
+        { "name": "VALOR_TOTAL",          "type": "decimal",   "description": "Valor total do produto na nota fiscal." },
+        { "name": "QUANTIDADE_COMPRADA",  "type": "decimal",   "description": "Quantidade comprada do produto na nota fiscal." },
+        { "name": "VALOR_UNITARIO",       "type": "decimal",   "description": "Valor unitário do produto." },
+        { "name": "CNPJ_CPF",            "type": "string",    "description": "CNPJ ou CPF da loja." },
+        { "name": "NOME",                "type": "string",    "description": "Nome da loja." },
+        { "name": "VALOR_FATURAMENTO_LOJA", "type": "decimal", "description": "Faturamento mensal da loja." },
+        { "name": "CEP",                 "type": "string",    "description": "CEP da loja." },
+        { "name": "MUNICIPIO",           "type": "string",    "description": "Município da loja." },
+        { "name": "UF",                  "type": "string",    "description": "UF da loja." },
+        { "name": "NOMREGGEO",           "type": "string",    "description": "Região do Brasil que a loja está." },
+        { "name": "NOMMSOREG",           "type": "string",    "description": "Mesorregião do Brasil que a loja está." }
+      ]
+    }
+  ],
+  "join_hints": [],
+  "metric_glossary": [
+    { "term": "faturamento", "maps_to": "SUM(VALOR_TOTAL)" },
+    { "term": "volume", "maps_to": "SUM(QUANTIDADE_COMPRADA)" },
+    { "term": "preco medio", "maps_to": "AVG(VALOR_UNITARIO)" },
+    { "term": "preco ideal", "maps_to": "PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY VALOR_UNITARIO) — mediana do mercado" },
+    { "term": "share", "maps_to": "100.0 * SUM(VALOR_TOTAL) / SUM(SUM(VALOR_TOTAL)) OVER (...)" },
+    { "term": "amplitude de preco", "maps_to": "Diferença entre P90 e P10 do VALOR_UNITARIO, após remover outliers" },
+    { "term": "evolucao", "maps_to": "Comparação de SUM(VALOR_TOTAL) entre dois meses consecutivos" },
+    { "term": "mix ideal", "maps_to": "Top 3 marcas por faturamento dentro de uma subcategoria" }
+  ]
+}

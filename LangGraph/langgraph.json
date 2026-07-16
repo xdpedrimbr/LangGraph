@@ -1,0 +1,8 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["./"],
+  "graphs": {
+    "sql_analytics": "./solutions/sql_analytics/graph_agent.py:build_agent"
+  },
+  "env": "./.env"
+}
